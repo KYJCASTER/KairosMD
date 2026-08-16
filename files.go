@@ -108,6 +108,82 @@ func (f *Files) QuitApp() {
 	application.Get().Quit()
 }
 
+// ---------- /kfs 本地媒体目录白名单 ----------
+// 渲染的 Markdown 不可信（可构造任意 /kfs?path= 探测本地文件），
+// 因此 /kfs 只服务前端显式注册过的目录：当前打开的文档目录与用户主题目录。
+
+var (
+	kfsDirsMu sync.Mutex
+	kfsDirs   = make([]string, 0, 64)
+)
+
+const kfsMaxDirs = 64
+
+// AllowDir 把目录加入 /kfs 白名单（打开文档 / 加载用户主题时调用）
+func (f *Files) AllowDir(dir string) {
+	if dir == "" {
+		return
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return
+	}
+	abs = strings.ToLower(filepath.Clean(abs))
+	kfsDirsMu.Lock()
+	defer kfsDirsMu.Unlock()
+	for _, d := range kfsDirs {
+		if d == abs {
+			return
+		}
+	}
+	if len(kfsDirs) >= kfsMaxDirs {
+		kfsDirs = kfsDirs[len(kfsDirs)-kfsMaxDirs+1:]
+	}
+	kfsDirs = append(kfsDirs, abs)
+}
+
+// kfsPathAllowed 判断绝对路径是否落在任一白名单目录内（Windows 大小写不敏感）
+func kfsPathAllowed(path string) bool {
+	p := strings.ToLower(filepath.Clean(path))
+	kfsDirsMu.Lock()
+	defer kfsDirsMu.Unlock()
+	for _, d := range kfsDirs {
+		if strings.HasPrefix(p, d+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
+}
+
+// ---------- 原子写入 ----------
+
+// writeFileAtomic 临时文件 + rename，避免写入中途崩溃留下半截文件
+func writeFileAtomic(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	_, werr := tmp.Write(data)
+	cerr := tmp.Close()
+	if werr != nil || cerr != nil {
+		_ = os.Remove(tmpName)
+		if werr != nil {
+			return werr
+		}
+		return cerr
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	return nil
+}
+
 func firstMarkdownArg(args []string) string {
 	for _, arg := range args {
 		path := strings.Trim(strings.TrimSpace(arg), `"`)
@@ -212,9 +288,9 @@ func decodeText(b []byte) string {
 	return string(b)
 }
 
-// WriteFile 保存文件内容
+// WriteFile 保存文件内容（原子写入）
 func (f *Files) WriteFile(path, content string) error {
-	return os.WriteFile(path, []byte(content), 0o644)
+	return writeFileAtomic(path, []byte(content))
 }
 
 // SaveClipboardImage 把 base64 图片写入 dir/name（自动建目录），返回完整路径
@@ -223,11 +299,8 @@ func (f *Files) SaveClipboardImage(dir, name, b64 string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", err
-	}
 	p := filepath.Join(dir, name)
-	if err := os.WriteFile(p, data, 0o644); err != nil {
+	if err := writeFileAtomic(p, data); err != nil {
 		return "", err
 	}
 	return p, nil
@@ -267,16 +340,28 @@ func (f *Files) ReadConfig() (map[string]any, error) {
 	return cfg, nil
 }
 
+// SaveConfig 增量合并写入：前端只发变化字段，这里与磁盘现有配置合并，
+// 避免多进程（--multi 拆窗）互相用旧状态全量覆盖。原子写入防损坏。
 func (f *Files) SaveConfig(cfg map[string]any) error {
 	dir, err := f.ConfigDir()
 	if err != nil {
 		return err
 	}
-	b, err := json.MarshalIndent(cfg, "", "  ")
+	path := filepath.Join(dir, "config.json")
+
+	existing := map[string]any{}
+	if b, err := os.ReadFile(path); err == nil {
+		_ = json.Unmarshal(b, &existing)
+	}
+	for k, v := range cfg {
+		existing[k] = v
+	}
+
+	b, err := json.MarshalIndent(existing, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, "config.json"), b, 0o644)
+	return writeFileAtomic(path, b)
 }
 
 // ---------- 崩溃恢复草稿 ----------
@@ -311,7 +396,7 @@ func (f *Files) SaveDraft(forPath, name, content string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(p, b, 0o644)
+	return writeFileAtomic(p, b)
 }
 
 // LoadDraft 读取草稿；不存在（或已损坏）返回 nil

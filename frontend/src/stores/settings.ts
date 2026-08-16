@@ -62,6 +62,10 @@ export const useSettingsStore = defineStore('settings', {
       }
       themeEngine.apply(this.themeId, { silent: true })
       this.applyTypography()
+      const all = { ...this.$state } as Record<string, unknown>
+      delete all._persistTimer
+      delete all._lastPersisted
+      this._lastPersisted = JSON.parse(JSON.stringify(all)) as Record<string, unknown>
     },
 
     setTheme(id: string) {
@@ -117,17 +121,35 @@ export const useSettingsStore = defineStore('settings', {
     },
 
     _persistTimer: undefined as ReturnType<typeof setTimeout> | undefined,
+    _lastPersisted: undefined as Record<string, unknown> | undefined,
 
     schedulePersist(delay = 400) {
       clearTimeout(this._persistTimer)
       this._persistTimer = setTimeout(() => void this.persist(), delay)
     },
 
+    /**
+     * 增量持久化：只把「相对上次落盘发生变化」的字段发给 Go，由 Go 与磁盘合并。
+     * 多进程（--multi 拖出拆窗）场景下各窗口只写自己改过的字段，互不覆盖。
+     */
     async persist() {
       try {
-        const data: Record<string, unknown> = { ...this.$state }
-        delete (data as Record<string, unknown>)._persistTimer
-        await SaveConfig(data)
+        const all = { ...this.$state } as Record<string, unknown>
+        delete all._persistTimer
+        delete all._lastPersisted
+        const diff: Record<string, unknown> = {}
+        if (this._lastPersisted) {
+          for (const k of Object.keys(all)) {
+            if (JSON.stringify(all[k]) !== JSON.stringify(this._lastPersisted[k])) {
+              diff[k] = all[k]
+            }
+          }
+        } else {
+          Object.assign(diff, all)
+        }
+        if (!Object.keys(diff).length) return
+        this._lastPersisted = JSON.parse(JSON.stringify(all)) as Record<string, unknown>
+        await SaveConfig(diff)
       } catch (e) {
         console.warn('[settings] 保存失败', e)
       }

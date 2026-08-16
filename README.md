@@ -209,10 +209,15 @@ kairos.ui.addCss('.my-block { color: red; }')
 
 ```
 KairosMd/
-├── main.go              # Wails 入口、无边框窗口、资源服务
-├── files.go             # FileService：文件对话框/读取/配置/插件/主题目录
-├── assets.go            # 本地媒体资源服务（/kfs）
+├── main.go              # Wails v3 入口、窗口配置、单实例、资产服务组合
+├── files.go             # Files 服务：文件/对话框/配置/草稿/白名单/多窗口
+├── assets.go            # 本地媒体资源服务（/kfs，目录白名单校验）
+├── Taskfile.yml         # 构建任务入口（wails3 build / package）
+├── build/
+│   ├── config.yml       # 应用信息 + .md 文件关联配置
+│   └── windows/nsis/    # NSIS 安装脚本（由 config.yml 生成关联）
 ├── frontend/
+│   ├── bindings/        # wails3 generate bindings 生成的 TS 绑定（勿手改）
 │   └── src/
 │       ├── core/        # 扩展性核心层
 │       │   ├── markdown/    # 渲染管线 + Shiki
@@ -220,11 +225,19 @@ KairosMd/
 │       │   ├── plugins/     # 插件运行时 + API
 │       │   └── commands/    # 命令注册表 + 快捷键
 │       ├── stores/      # Pinia：settings / library / ui
-│       ├── components/  # Titlebar / Reader / CommandPalette / Toast
+│       ├── components/  # Titlebar / TabBar / Reader / Effects / ...
 │       ├── views/       # Home / Settings / Plugins
 │       └── style.css    # 全局样式 + Markdown 排版
 └── samples/             # 示例 Markdown 文档
 ```
+
+## ⚠️ 已知限制与注意事项
+
+- **修改 Go 服务方法后必须重新生成绑定**：`wails3 generate bindings`，否则前端仍调用旧 ID，出现"调了没反应"。
+- **系统关闭（Alt+F4 / 任务栏）不弹未保存确认**：Wails v3 beta 的窗口关闭事件不可取消。未保存内容由草稿兜底——停止输入 3 秒、窗口失焦或点标题栏关闭时都会立即落盘，下次打开同一文档会提示恢复。标题栏的关闭按钮仍走完整确认。
+- **代码高亮内置常用语言**；未内置语言在开发模式（`wails3 dev`）下会按需补载，生产构建中显示为纯文本代码块。
+- **本地图片按文档目录白名单加载**：`/kfs` 只服务当前打开文档所在目录与用户主题目录下的文件，防止渲染不可信 Markdown 时被用于探测任意本地文件。
+- 配置采用增量合并 + 原子写入，多窗口（拖出标签拆分的 `--multi` 进程）共享配置互不覆盖。
 
 ## 📜 许可
 

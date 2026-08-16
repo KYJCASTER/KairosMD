@@ -15,6 +15,13 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wails
 import * as $models from "./models.js";
 
 /**
+ * AllowDir 把目录加入 /kfs 白名单（打开文档 / 加载用户主题时调用）
+ */
+export function AllowDir(dir: string): $CancellablePromise<void> {
+    return $Call.ByID(2747285133, dir);
+}
+
+/**
  * AppVersion 返回应用版本号，供插件 API 判断兼容性
  */
 export function AppVersion(): $CancellablePromise<string> {
@@ -125,6 +132,10 @@ export function SaveClipboardImage(dir: string, name: string, b64: string): $Can
     return $Call.ByID(1062785383, dir, name, b64);
 }
 
+/**
+ * SaveConfig 增量合并写入：前端只发变化字段，这里与磁盘现有配置合并，
+ * 避免多进程（--multi 拆窗）互相用旧状态全量覆盖。原子写入防损坏。
+ */
 export function SaveConfig(cfg: { [_ in string]?: any } | null): $CancellablePromise<void> {
     return $Call.ByID(2444243906, cfg);
 }
@@ -144,7 +155,7 @@ export function SaveHtmlPath(name: string): $CancellablePromise<string> {
 }
 
 /**
- * WriteFile 保存文件内容
+ * WriteFile 保存文件内容（原子写入）
  */
 export function WriteFile(path: string, content: string): $CancellablePromise<void> {
     return $Call.ByID(3306767214, path, content);

@@ -1,7 +1,7 @@
 import type { ThemeDef } from '../types'
 import { bus } from '../events'
 import { builtinThemes, DEFAULT_THEME_ID } from './defs'
-import { ListUserThemes } from '../../../wailsjs/go/main/Files'
+import { ListUserThemes, AllowDir } from '../../../wailsjs/go/main/Files'
 
 const camelToKebab = (s: string) => s.replace(/[A-Z]/g, (m) => '-' + m.toLowerCase())
 
@@ -71,7 +71,10 @@ class ThemeEngine {
         const def = normalizeUserTheme(raw)
         if (def) {
           this.themes.set(def.id, def)
-          ;(def as ThemeDef & { _dir?: string })._dir = typeof raw._dir === 'string' ? raw._dir : ''
+          const dir = typeof raw._dir === 'string' ? raw._dir : ''
+          ;(def as ThemeDef & { _dir?: string })._dir = dir
+          // /kfs 白名单：用户主题目录下的背景图需要放行
+          if (dir) void AllowDir(dir)
         }
       }
     } catch (e) {

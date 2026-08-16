@@ -41,6 +41,12 @@ func localFileHandler() http.Handler {
 			return
 		}
 		p = filepath.Clean(p)
+		// 白名单校验：仅允许前端显式注册过的目录（当前文档目录 / 用户主题目录），
+		// 防止渲染不可信 Markdown 时被用来探测任意本地媒体文件
+		if !kfsPathAllowed(p) {
+			http.Error(w, "directory not allowed", http.StatusForbidden)
+			return
+		}
 		ct, ok := assetExts[strings.ToLower(filepath.Ext(p))]
 		if !ok {
 			http.Error(w, "file type not allowed", http.StatusForbidden)

@@ -9,7 +9,7 @@ import { useUiStore } from './ui'
 import { WindowSetTitle } from '../../wailsjs/runtime/runtime'
 import {
   PickFile, ReadFile, WriteFile, SaveAsPath, SaveHtmlPath, QuitApp,
-  SaveDraft, LoadDraft, DeleteDraft, OpenNewWindow,
+  SaveDraft, LoadDraft, DeleteDraft, OpenNewWindow, AllowDir,
 } from '../../wailsjs/go/main/Files'
 
 export type DocMode = 'read' | 'split' | 'edit'
@@ -254,6 +254,8 @@ export const useLibraryStore = defineStore('library', {
         const settings = useSettingsStore()
         settings.lastFile = path
         settings.schedulePersist()
+        // /kfs 白名单：允许加载该文档目录下的相对路径图片
+        void AllowDir(path.replace(/\\/g, '/').replace(/\/[^/]*$/, ''))
         useUiStore().openView('reader')
         bus.emit('reader:file-open', { path, content })
         void this.checkDraft(doc)
