@@ -34,12 +34,25 @@ func startupBackground() application.RGBA {
 	return application.NewRGB(253, 248, 241)
 }
 
+// withCSP 为所有响应注入内容安全策略（S5 纵深防御）：
+// 阻止内联事件处理器（XSS 主要向量）与外部脚本。
+// 'unsafe-eval' 仅为插件系统（new Function 执行 main.js）保留；不包含 'unsafe-inline'。
+func withCSP(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Security-Policy",
+			"default-src 'self'; img-src 'self' data: blob: https:; media-src 'self' https:; "+
+				"style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self'; "+
+				"script-src 'self' 'unsafe-eval'; frame-src 'none'; object-src 'none'")
+		next.ServeHTTP(w, r)
+	})
+}
+
 // assetHandler 组合 /kfs 本地媒体服务与前端资产服务
 func assetHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("/kfs", localFileHandler())
 	mux.Handle("/", application.AssetFileServerFS(assets))
-	return mux
+	return withCSP(mux)
 }
 
 func main() {

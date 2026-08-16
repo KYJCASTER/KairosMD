@@ -9,7 +9,7 @@ import { useUiStore } from './ui'
 import { WindowSetTitle } from '../../wailsjs/runtime/runtime'
 import {
   PickFile, ReadFile, WriteFile, SaveAsPath, SaveHtmlPath, QuitApp,
-  SaveDraft, LoadDraft, DeleteDraft, OpenNewWindow, AllowDir,
+  SaveDraft, LoadDraft, DeleteDraft, OpenNewWindow, AllowDir, AuthorizePath,
 } from '../../wailsjs/go/main/Files'
 
 export type DocMode = 'read' | 'split' | 'edit'
@@ -234,6 +234,8 @@ export const useLibraryStore = defineStore('library', {
       this.loading = true
       this.error = ''
       try {
+        // S2：路径授权（对话框/命令行/最近文件已由 Go 侧授权；.md 链接等走此兜底，仅白名单目录内放行）
+        await AuthorizePath(path)
         const content = await ReadFile(path)
         let doc = existing
         if (doc) {

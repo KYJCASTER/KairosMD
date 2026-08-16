@@ -14,9 +14,23 @@ function reload() {
 }
 
 async function toggle(p: InstalledPlugin, on: boolean) {
-  await pluginRuntime.setEnabled(p.manifest.id, on)
+  // S3：外部插件以应用全权限执行（可读写已授权文件、访问 DOM），启用前要求显式确认
+  if (on && !p.builtin) {
+    ui.ask({
+      text: `启用外部插件「${p.manifest.name}」？`,
+      detail: '外部插件代码会以应用完整权限运行，请确认插件来源可信',
+      confirmText: '信任并启用',
+      onConfirm: () => void enablePlugin(p),
+    })
+    return
+  }
+  await enablePlugin(p)
+}
+
+async function enablePlugin(p: InstalledPlugin) {
+  await pluginRuntime.setEnabled(p.manifest.id, !p.enabled)
   reload()
-  ui.toast(`${p.manifest.name} 已${on ? '启用' : '停用'}`, 'success')
+  ui.toast(`${p.manifest.name} 已${p.enabled ? '启用' : '停用'}`, 'success')
 }
 
 async function rescan() {

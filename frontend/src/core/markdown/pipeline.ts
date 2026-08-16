@@ -10,6 +10,7 @@
 import MarkdownIt from 'markdown-it'
 import footnote from 'markdown-it-footnote'
 import katex from '@vscode/markdown-it-katex'
+import DOMPurify from 'dompurify'
 import type { TocItem } from '../types'
 import { bus } from '../events'
 import { highlightCode, escapeHtml } from './shiki'
@@ -93,6 +94,19 @@ export function resolveAsset(src: string, filePath: string): string {
     else parts.push(seg)
   }
   return '/kfs?path=' + encodeURIComponent(parts.join('/'))
+}
+
+/**
+ * 净化渲染产物：raw HTML 直通（html:true）+ v-html 下，不可信 Markdown 可注入
+ * `<img onerror>` / `<svg onload>` / `<iframe srcdoc>` 等执行向量。
+ * 事件属性默认全移除；data-* 默认保留（data-k-ext / data-k-md / data-line 等内部标记）。
+ * Shiki 的 style="color:..." 与 KaTeX 的 class 均保留。
+ */
+export function sanitizeHtml(html: string): string {
+  return DOMPurify.sanitize(html, {
+    FORBID_TAGS: ['style', 'iframe', 'object', 'embed', 'form', 'input', 'button', 'textarea', 'script', 'link', 'meta', 'base'],
+    FORBID_ATTR: ['srcdoc'],
+  })
 }
 
 class Pipeline {
@@ -225,6 +239,8 @@ class Pipeline {
         }
       }
     }
+    // 最后统一净化：插件产物同样受检（S1 XSS 防线）
+    html = sanitizeHtml(html)
     return { html, toc: env.toc }
   }
 }

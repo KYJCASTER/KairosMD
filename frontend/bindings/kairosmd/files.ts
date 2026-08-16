@@ -28,6 +28,14 @@ export function AppVersion(): $CancellablePromise<string> {
     return $Call.ByID(1909390684);
 }
 
+/**
+ * AuthorizePath 前端打开文档前调用：仅放行落在 /kfs 白名单目录内的路径
+ * （用户已明确打开过该目录），防止被注入的 JS 借授权接口扩权。
+ */
+export function AuthorizePath(path: string): $CancellablePromise<void> {
+    return $Call.ByID(3635465219, path);
+}
+
 export function ConfigDir(): $CancellablePromise<string> {
     return $Call.ByID(4085185426);
 }
@@ -98,7 +106,8 @@ export function ReadConfig(): $CancellablePromise<{ [_ in string]?: any } | null
 }
 
 /**
- * ReadFile 读取文件内容（限制 16MB）；UTF-8 优先，旧中文文档回退 GB18030 解码
+ * ReadFile 读取文件内容（限制 16MB）；UTF-8 优先，旧中文文档回退 GB18030 解码。
+ * 仅允许读取会话授权过的路径（用户打开/保存过的文件）。
  */
 export function ReadFile(path: string): $CancellablePromise<string> {
     return $Call.ByID(1735965079, path);
@@ -112,7 +121,7 @@ export function ReadPluginCode(id: string): $CancellablePromise<string> {
 }
 
 /**
- * RevealPath 在资源管理器中定位文件/文件夹
+ * RevealPath 在资源管理器中定位文件/文件夹（仅授权路径或白名单目录内）
  */
 export function RevealPath(path: string): $CancellablePromise<void> {
     return $Call.ByID(4212949547, path);
@@ -126,7 +135,8 @@ export function SaveAsPath(name: string): $CancellablePromise<string> {
 }
 
 /**
- * SaveClipboardImage 把 base64 图片写入 dir/name（自动建目录），返回完整路径
+ * SaveClipboardImage 把 base64 图片写入 dir/name，返回完整路径。
+ * dir 必须在 /kfs 白名单目录内；name 强制取 Base（防 ..\ 穿越）且仅限图片扩展名。
  */
 export function SaveClipboardImage(dir: string, name: string, b64: string): $CancellablePromise<string> {
     return $Call.ByID(1062785383, dir, name, b64);
@@ -155,7 +165,7 @@ export function SaveHtmlPath(name: string): $CancellablePromise<string> {
 }
 
 /**
- * WriteFile 保存文件内容（原子写入）
+ * WriteFile 保存文件内容（原子写入）；仅授权路径且限文本类扩展名
  */
 export function WriteFile(path: string, content: string): $CancellablePromise<void> {
     return $Call.ByID(3306767214, path, content);

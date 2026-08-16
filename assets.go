@@ -65,6 +65,10 @@ func localFileHandler() http.Handler {
 		}
 		w.Header().Set("Content-Type", ct)
 		w.Header().Set("Cache-Control", "no-cache")
+		// S6：作为图像加载时无害；若被当作文档（顶层导航/历史 iframe 残留）加载则完全沙箱化，
+		// SVG 内的脚本不会执行
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
 		http.ServeContent(w, r, st.Name(), st.ModTime(), file)
 	})
 }

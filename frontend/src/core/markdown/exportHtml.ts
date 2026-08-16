@@ -3,6 +3,7 @@
  * 本地图片（/kfs）与 KaTeX 字体转 base64 内嵌，单文件离线可看。
  */
 import { themeEngine } from '../themes/engine'
+import { sanitizeHtml } from './pipeline'
 
 const MAX_IMG_BYTES = 4 * 1024 * 1024
 const MAX_FONT_BYTES = 1024 * 1024
@@ -14,7 +15,8 @@ export async function buildExportHtml(html: string, title: string): Promise<stri
   }
   css = themeVars(css) + '\n' + css
 
-  const body = await inlineImages(html)
+  // S4：导出内容再次净化（与渲染管线同一净化器），避免成为 XSS 传播载体
+  const body = sanitizeHtml(await inlineImages(html))
   const dark = themeEngine.current.dark ? ' class="k-dark"' : ''
 
   return `<!doctype html>
@@ -22,6 +24,7 @@ export async function buildExportHtml(html: string, title: string): Promise<stri
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:">
 <title>${escapeHtml(title)}</title>
 <style>
 html{scroll-behavior:smooth}

@@ -21,6 +21,7 @@ export interface DraftInfoBinding {
 
 export const AppVersion = (): Promise<string> => FilesBinding.AppVersion() as Promise<string>
 export const AllowDir = (arg1: string): Promise<void> => FilesBinding.AllowDir(arg1) as Promise<void>
+export const AuthorizePath = (arg1: string): Promise<void> => FilesBinding.AuthorizePath(arg1) as Promise<void>
 export const ConfigDir = (): Promise<string> => FilesBinding.ConfigDir() as Promise<string>
 export const DeleteDraft = (arg1: string): Promise<void> => FilesBinding.DeleteDraft(arg1) as Promise<void>
 export const InitialFile = (): Promise<string> => FilesBinding.InitialFile() as Promise<string>

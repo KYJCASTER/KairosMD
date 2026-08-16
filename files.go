@@ -35,9 +35,79 @@ type Files struct {
 	initialPath   string
 	pendingPaths  []string
 	app           *application.App
+
+	// S2：会话授权文件集——只有用户显式动作（对话框/命令行/最近文件）引入的路径才能被绑定读写
+	authorized map[string]bool
 }
 
-func NewFiles() *Files { return &Files{} }
+func NewFiles() *Files {
+	f := &Files{authorized: map[string]bool{}}
+	f.authorizeFromConfig()
+	f.authorizePath(firstMarkdownArg(os.Args[1:]))
+	return f
+}
+
+// ---------- S2 路径授权集 ----------
+
+func normPath(p string) string {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return ""
+	}
+	return strings.ToLower(filepath.Clean(abs))
+}
+
+func (f *Files) authorizePath(p string) {
+	if n := normPath(p); n != "" {
+		f.mu.Lock()
+		f.authorized[n] = true
+		f.mu.Unlock()
+	}
+}
+
+func (f *Files) isAuthorized(p string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.authorized[normPath(p)]
+}
+
+// authorizeFromConfig 从 config.json 的 recent / lastFile 提取历史授权路径
+func (f *Files) authorizeFromConfig() {
+	cfg, err := f.ReadConfig()
+	if err != nil {
+		return
+	}
+	if s, ok := cfg["lastFile"].(string); ok && s != "" {
+		f.authorizePath(s)
+	}
+	if arr, ok := cfg["recent"].([]any); ok {
+		for _, it := range arr {
+			if m, ok := it.(map[string]any); ok {
+				if p, ok := m["path"].(string); ok && p != "" {
+					f.authorizePath(p)
+				}
+			}
+		}
+	}
+}
+
+// AuthorizePath 前端打开文档前调用：仅放行落在 /kfs 白名单目录内的路径
+// （用户已明确打开过该目录），防止被注入的 JS 借授权接口扩权。
+func (f *Files) AuthorizePath(path string) error {
+	if f.isAuthorized(path) {
+		return nil
+	}
+	if !kfsPathAllowed(path) {
+		return fmt.Errorf("路径未授权：%s", path)
+	}
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".md", ".markdown", ".mdx", ".txt":
+	default:
+		return fmt.Errorf("文件类型不支持：%s", path)
+	}
+	f.authorizePath(path)
+	return nil
+}
 
 // ServiceStartup 服务启动钩子：捕获命令行文件参数并清理过期草稿
 func (f *Files) ServiceStartup(_ context.Context, _ application.ServiceOptions) error {
@@ -45,6 +115,7 @@ func (f *Files) ServiceStartup(_ context.Context, _ application.ServiceOptions) 
 	f.app = application.Get()
 	f.initialPath = firstMarkdownArg(os.Args[1:])
 	f.mu.Unlock()
+	f.authorizePath(f.initialPath)
 	f.cleanOldDrafts()
 	return nil
 }
@@ -83,6 +154,8 @@ func (f *Files) handleSecondInstance(data application.SecondInstanceData) {
 	if path == "" {
 		return
 	}
+	// 双击打开的文件属于用户显式动作，直接授权
+	f.authorizePath(path)
 
 	f.mu.Lock()
 	frontendReady := f.frontendReady
@@ -224,10 +297,14 @@ func (f *Files) OpenNewWindow(path string) error {
 // ---------- 对话框 ----------
 
 func (f *Files) PickFile() (string, error) {
-	return application.Get().Dialog.OpenFile().
+	p, err := application.Get().Dialog.OpenFile().
 		SetTitle("打开 Markdown 文件").
 		AddFilter("Markdown (*.md;*.markdown;*.mdx;*.txt)", "*.md;*.markdown;*.mdx;*.txt").
 		PromptForSingleSelection()
+	if err == nil && p != "" {
+		f.authorizePath(p) // 用户对话框选择 → 授权
+	}
+	return p, err
 }
 
 // SaveAsPath 弹出保存对话框，返回用户选择的路径
@@ -240,7 +317,11 @@ func (f *Files) SaveAsPath(name string) (string, error) {
 			{DisplayName: "Markdown (*.md)", Pattern: "*.md"},
 		},
 	})
-	return d.PromptForSingleSelection()
+	p, err := d.PromptForSingleSelection()
+	if err == nil && p != "" {
+		f.authorizePath(p)
+	}
+	return p, err
 }
 
 // SaveHtmlPath 导出 HTML 的保存对话框
@@ -253,13 +334,21 @@ func (f *Files) SaveHtmlPath(name string) (string, error) {
 			{DisplayName: "HTML (*.html)", Pattern: "*.html"},
 		},
 	})
-	return d.PromptForSingleSelection()
+	p, err := d.PromptForSingleSelection()
+	if err == nil && p != "" {
+		f.authorizePath(p)
+	}
+	return p, err
 }
 
 // ---------- 读取 ----------
 
-// ReadFile 读取文件内容（限制 16MB）；UTF-8 优先，旧中文文档回退 GB18030 解码
+// ReadFile 读取文件内容（限制 16MB）；UTF-8 优先，旧中文文档回退 GB18030 解码。
+// 仅允许读取会话授权过的路径（用户打开/保存过的文件）。
 func (f *Files) ReadFile(path string) (string, error) {
+	if !f.isAuthorized(path) {
+		return "", fmt.Errorf("路径未授权")
+	}
 	info, err := os.Stat(path)
 	if err != nil {
 		return "", err
@@ -288,18 +377,37 @@ func decodeText(b []byte) string {
 	return string(b)
 }
 
-// WriteFile 保存文件内容（原子写入）
+// WriteFile 保存文件内容（原子写入）；仅授权路径且限文本类扩展名
 func (f *Files) WriteFile(path, content string) error {
+	if !f.isAuthorized(path) {
+		return fmt.Errorf("路径未授权")
+	}
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".md", ".markdown", ".mdx", ".txt", ".html", ".htm", ".json":
+	default:
+		return fmt.Errorf("不允许写入该文件类型")
+	}
 	return writeFileAtomic(path, []byte(content))
 }
 
-// SaveClipboardImage 把 base64 图片写入 dir/name（自动建目录），返回完整路径
+// SaveClipboardImage 把 base64 图片写入 dir/name，返回完整路径。
+// dir 必须在 /kfs 白名单目录内；name 强制取 Base（防 ..\ 穿越）且仅限图片扩展名。
 func (f *Files) SaveClipboardImage(dir, name, b64 string) (string, error) {
+	if !kfsPathAllowed(filepath.Join(dir, name)) {
+		return "", fmt.Errorf("目录未授权")
+	}
+	cleanName := filepath.Base(name)
+	ext := strings.ToLower(filepath.Ext(cleanName))
+	switch ext {
+	case ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".avif":
+	default:
+		return "", fmt.Errorf("不允许的图片类型")
+	}
 	data, err := base64.StdEncoding.DecodeString(b64)
 	if err != nil {
 		return "", err
 	}
-	p := filepath.Join(dir, name)
+	p := filepath.Join(dir, cleanName)
 	if err := writeFileAtomic(p, data); err != nil {
 		return "", err
 	}
@@ -526,9 +634,12 @@ func (f *Files) ListUserThemes() []map[string]any {
 
 // ---------- 杂项 ----------
 
-// RevealPath 在资源管理器中定位文件/文件夹
+// RevealPath 在资源管理器中定位文件/文件夹（仅授权路径或白名单目录内）
 func (f *Files) RevealPath(path string) error {
-	return shellReveal(path)
+	if f.isAuthorized(path) || kfsPathAllowed(path) {
+		return shellReveal(path)
+	}
+	return fmt.Errorf("路径未授权")
 }
 
 // AppVersion 返回应用版本号，供插件 API 判断兼容性
