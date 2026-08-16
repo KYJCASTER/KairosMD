@@ -49,6 +49,7 @@ const paths: Record<string, string> = {
     'M3 6.5A2.5 2.5 0 0 1 5.5 4h3l2 2.5h6A2.5 2.5 0 0 1 19 9v1M3 6.5V18a2 2 0 0 0 2 2h13.2a1.8 1.8 0 0 0 1.7-1.3L21.5 13H7.6a1.8 1.8 0 0 0-1.7 1.3L3 20',
   // 编辑工具栏
   heading: 'M6 5v14M18 5v14M6 12h12',
+  plus: 'M12 5v14M5 12h14',
   bold: 'M8 5h5.2a3.4 3.4 0 0 1 0 6.8H8V5Zm0 6.8h6a3.6 3.6 0 0 1 0 7.2H8v-7.2Z',
   italic: 'M15.5 5H9.5M14.5 19H8.5M14.5 5 9.5 19',
   strike: 'M5 12h14M8.5 8.5C8.5 7 10 6 12 6s3.5 1 3.5 2.5M15.5 15.5C15.5 17 14 18 12 18s-3.5-1-3.5-2.5',
@@ -63,7 +64,7 @@ const paths: Record<string, string> = {
 }
 
 const strokeOnly = new Set([
-  'chevron', 'down', 'left', 'minus', 'square', 'copy', 'search', 'gear', 'plug', 'file', 'refresh', 'list', 'effects', 'folder', 'folder-open', 'x', 'check', 'save',
+  'chevron', 'down', 'left', 'minus', 'square', 'copy', 'search', 'gear', 'plug', 'file', 'refresh', 'list', 'effects', 'folder', 'folder-open', 'x', 'check', 'save', 'plus',
   'heading', 'italic', 'strike', 'code', 'codeblock', 'quote', 'link', 'image', 'table', 'task', 'hr',
 ])
 </script>

@@ -5,6 +5,7 @@ import { useLibraryStore } from './stores/library'
 import { useSettingsStore } from './stores/settings'
 import { runCommand } from './core/commands/registry'
 import Titlebar from './components/Titlebar.vue'
+import TabBar from './components/TabBar.vue'
 import DocView from './components/DocView.vue'
 import ToastHost from './components/ToastHost.vue'
 import CommandPalette from './components/CommandPalette.vue'
@@ -64,13 +65,15 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
   <div class="k-app">
     <EffectsLayer v-if="settings.effectsOn" />
     <Titlebar v-show="!ui.immersive" />
+    <TabBar v-if="!ui.immersive && lib.opened && ui.view === 'reader'" />
 
     <main class="k-main">
       <SettingsView v-if="ui.view === 'settings'" />
       <PluginsView v-else-if="ui.view === 'plugins'" />
       <template v-else>
-        <DocView v-if="lib.hasContent" />
-        <HomeView v-else />
+        <!-- 每个标签一个 DocView（v-show 保活：切标签不丢撤销 / 滚动 / 模式） -->
+        <DocView v-for="d in lib.docs" :key="d.id" v-show="d.id === lib.activeDocId" :doc="d" />
+        <HomeView v-if="!lib.opened" />
       </template>
     </main>
 

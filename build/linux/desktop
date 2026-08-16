@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Name=KairosMd
+Comment=极简 Markdown 阅读器
+# The Exec line includes %u to pass the URL to the application
+Exec=/usr/local/bin/KairosMd %u
+Terminal=false
+Type=Application
+Icon=KairosMd
+Categories=Utility;
+StartupWMClass=KairosMd
+
+ 

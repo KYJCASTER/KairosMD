@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -16,8 +17,7 @@ import (
 
 	"golang.org/x/text/encoding/simplifiedchinese"
 
-	"github.com/wailsapp/wails/v2/pkg/options"
-	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
 // ExternalPlugin 磁盘上的外部插件（%APPDATA%/KairosMd/plugins/<id>/）
@@ -27,26 +27,26 @@ type ExternalPlugin struct {
 	HasMain  bool           `json:"hasMain"`
 }
 
-// Files 是暴露给前端的核心服务：文件对话框、读取、配置与用户资源目录
+// Files 是暴露给前端的核心服务：文件对话框、读取、配置、草稿、贴图、多窗口
 type Files struct {
-	ctx context.Context
-
 	mu            sync.Mutex
 	frontendReady bool
 	forceQuit     bool // 前端确认未保存提示后置位，放行关闭
 	initialPath   string
 	pendingPaths  []string
+	app           *application.App
 }
 
-func NewFiles() *Files {
-	return &Files{initialPath: firstMarkdownArg(os.Args[1:])}
-}
+func NewFiles() *Files { return &Files{} }
 
-func (f *Files) startup(ctx context.Context) {
+// ServiceStartup 服务启动钩子：捕获命令行文件参数并清理过期草稿
+func (f *Files) ServiceStartup(_ context.Context, _ application.ServiceOptions) error {
 	f.mu.Lock()
-	f.ctx = ctx
+	f.app = application.Get()
+	f.initialPath = firstMarkdownArg(os.Args[1:])
 	f.mu.Unlock()
 	f.cleanOldDrafts()
+	return nil
 }
 
 // InitialFile 返回一个通过文件关联传入的待打开 Markdown 文件路径。
@@ -78,7 +78,7 @@ func (f *Files) MarkFrontendReady() []string {
 }
 
 // handleSecondInstance 将第二次启动传入的文件转交给当前实例。
-func (f *Files) handleSecondInstance(data options.SecondInstanceData) {
+func (f *Files) handleSecondInstance(data application.SecondInstanceData) {
 	path := firstMarkdownArg(data.Args)
 	if path == "" {
 		return
@@ -89,35 +89,194 @@ func (f *Files) handleSecondInstance(data options.SecondInstanceData) {
 	if !frontendReady {
 		f.pendingPaths = append(f.pendingPaths, path)
 	}
-	ctx := f.ctx
 	f.mu.Unlock()
 
-	if frontendReady && ctx != nil {
-		runtime.EventsEmit(ctx, "app:open-file", path)
+	if frontendReady {
+		application.Get().Event.Emit("app:open-file", path)
 	}
 }
 
-// beforeClose 拦截窗口关闭：未确认时通知前端弹未保存提示，由前端确认后经 QuitApp 放行
-func (f *Files) beforeClose(ctx context.Context) bool {
-	f.mu.Lock()
-	force := f.forceQuit
-	f.mu.Unlock()
-	if force {
-		return false
-	}
-	runtime.EventsEmit(ctx, "app:confirm-close")
-	return true
+// handleWindowClosing 系统关闭窗口（Alt+F4 / 任务栏）：v3 事件不可取消，
+// 直接放行；未保存内容由草稿系统兜底。自定义标题栏的关闭按钮走前端确认。
+func (f *Files) handleWindowClosing(win *application.WebviewWindow, e *application.WindowEvent) {
+	// 仅最后窗口关闭时退出应用（--multi 拆窗进程关闭自己）
+	application.Get().Quit()
 }
 
 // QuitApp 前端确认（或无未保存修改）后调用，真正退出
 func (f *Files) QuitApp() {
-	f.mu.Lock()
-	f.forceQuit = true
-	ctx := f.ctx
-	f.mu.Unlock()
-	if ctx != nil {
-		runtime.Quit(ctx)
+	application.Get().Quit()
+}
+
+func firstMarkdownArg(args []string) string {
+	for _, arg := range args {
+		path := strings.Trim(strings.TrimSpace(arg), `"`)
+		if path == "" || strings.HasPrefix(path, "-") {
+			continue
+		}
+		info, err := os.Stat(path)
+		if err != nil || info.IsDir() {
+			continue
+		}
+		switch strings.ToLower(filepath.Ext(path)) {
+		case ".md", ".markdown", ".mdx":
+			return path
+		}
 	}
+	return ""
+}
+
+// IsMultiWindow 当前进程是否以独立新窗口模式启动（标签拖出拆分）
+func IsMultiWindow() bool {
+	for _, a := range os.Args[1:] {
+		if a == "--multi" {
+			return true
+		}
+	}
+	return false
+}
+
+// OpenNewWindow 拖出标签：以 --multi 启动一个独立窗口进程展示该文档
+func (f *Files) OpenNewWindow(path string) error {
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	return exec.Command(exe, "--multi", path).Start()
+}
+
+// ---------- 对话框 ----------
+
+func (f *Files) PickFile() (string, error) {
+	return application.Get().Dialog.OpenFile().
+		SetTitle("打开 Markdown 文件").
+		AddFilter("Markdown (*.md;*.markdown;*.mdx;*.txt)", "*.md;*.markdown;*.mdx;*.txt").
+		PromptForSingleSelection()
+}
+
+// SaveAsPath 弹出保存对话框，返回用户选择的路径
+func (f *Files) SaveAsPath(name string) (string, error) {
+	d := application.Get().Dialog.SaveFile()
+	d.SetOptions(&application.SaveFileDialogOptions{
+		Title:    "保存为",
+		Filename: name,
+		Filters: []application.FileFilter{
+			{DisplayName: "Markdown (*.md)", Pattern: "*.md"},
+		},
+	})
+	return d.PromptForSingleSelection()
+}
+
+// SaveHtmlPath 导出 HTML 的保存对话框
+func (f *Files) SaveHtmlPath(name string) (string, error) {
+	d := application.Get().Dialog.SaveFile()
+	d.SetOptions(&application.SaveFileDialogOptions{
+		Title:    "导出 HTML",
+		Filename: name,
+		Filters: []application.FileFilter{
+			{DisplayName: "HTML (*.html)", Pattern: "*.html"},
+		},
+	})
+	return d.PromptForSingleSelection()
+}
+
+// ---------- 读取 ----------
+
+// ReadFile 读取文件内容（限制 16MB）；UTF-8 优先，旧中文文档回退 GB18030 解码
+func (f *Files) ReadFile(path string) (string, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", err
+	}
+	if info.Size() > 16<<20 {
+		return "", fmt.Errorf("文件过大（%.1f MB），KairosMd 只读取 16MB 以内的文本", float64(info.Size())/(1<<20))
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	return decodeText(b), nil
+}
+
+// decodeText：UTF-8 BOM 去头；合法 UTF-8 直用；否则按 GB18030（GBK 超集）解码；再失败原样返回
+func decodeText(b []byte) string {
+	if len(b) >= 3 && b[0] == 0xEF && b[1] == 0xBB && b[2] == 0xBF {
+		return string(b[3:])
+	}
+	if utf8.Valid(b) {
+		return string(b)
+	}
+	if out, err := simplifiedchinese.GB18030.NewDecoder().Bytes(b); err == nil && utf8.Valid(out) {
+		return string(out)
+	}
+	return string(b)
+}
+
+// WriteFile 保存文件内容
+func (f *Files) WriteFile(path, content string) error {
+	return os.WriteFile(path, []byte(content), 0o644)
+}
+
+// SaveClipboardImage 把 base64 图片写入 dir/name（自动建目录），返回完整路径
+func (f *Files) SaveClipboardImage(dir, name, b64 string) (string, error) {
+	data, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	p := filepath.Join(dir, name)
+	if err := os.WriteFile(p, data, 0o644); err != nil {
+		return "", err
+	}
+	return p, nil
+}
+
+// ---------- 配置目录与持久化 ----------
+
+func (f *Files) ConfigDir() (string, error) {
+	base, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(base, "KairosMd")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	return dir, nil
+}
+
+// ReadConfig 读取 config.json；不存在时返回空 map（不报错）
+func (f *Files) ReadConfig() (map[string]any, error) {
+	dir, err := f.ConfigDir()
+	if err != nil {
+		return nil, err
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "config.json"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return map[string]any{}, nil
+		}
+		return nil, err
+	}
+	cfg := map[string]any{}
+	if err := json.Unmarshal(b, &cfg); err != nil {
+		return map[string]any{}, nil // 配置损坏时回退默认值
+	}
+	return cfg, nil
+}
+
+func (f *Files) SaveConfig(cfg map[string]any) error {
+	dir, err := f.ConfigDir()
+	if err != nil {
+		return err
+	}
+	b, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, "config.json"), b, 0o644)
 }
 
 // ---------- 崩溃恢复草稿 ----------
@@ -205,156 +364,6 @@ func (f *Files) cleanOldDrafts() {
 	}
 }
 
-func firstMarkdownArg(args []string) string {
-	for _, arg := range args {
-		path := strings.Trim(strings.TrimSpace(arg), `"`)
-		if path == "" || strings.HasPrefix(path, "-") {
-			continue
-		}
-		info, err := os.Stat(path)
-		if err != nil || info.IsDir() {
-			continue
-		}
-		switch strings.ToLower(filepath.Ext(path)) {
-		case ".md", ".markdown", ".mdx":
-			return path
-		}
-	}
-	return ""
-}
-
-// ---------- 对话框 ----------
-
-func (f *Files) PickFile() (string, error) {
-	return runtime.OpenFileDialog(f.ctx, runtime.OpenDialogOptions{
-		Title: "打开 Markdown 文件",
-		Filters: []runtime.FileFilter{
-			{DisplayName: "Markdown (*.md;*.markdown;*.mdx;*.txt)", Pattern: "*.md;*.markdown;*.mdx;*.txt"},
-		},
-	})
-}
-
-// SaveAsPath 弹出保存对话框，返回用户选择的路径
-func (f *Files) SaveAsPath(name string) (string, error) {
-	return runtime.SaveFileDialog(f.ctx, runtime.SaveDialogOptions{
-		Title:           "保存为",
-		DefaultFilename: name,
-		Filters: []runtime.FileFilter{
-			{DisplayName: "Markdown (*.md)", Pattern: "*.md"},
-		},
-	})
-}
-
-// ---------- 读取 ----------
-
-// ReadFile 读取文件内容（限制 16MB）；UTF-8 优先，旧中文文档回退 GB18030 解码
-func (f *Files) ReadFile(path string) (string, error) {
-	info, err := os.Stat(path)
-	if err != nil {
-		return "", err
-	}
-	if info.Size() > 16<<20 {
-		return "", fmt.Errorf("文件过大（%.1f MB），KairosMd 只读取 16MB 以内的文本", float64(info.Size())/(1<<20))
-	}
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	return decodeText(b), nil
-}
-
-// decodeText：UTF-8 BOM 去头；合法 UTF-8 直用；否则按 GB18030（GBK 超集）解码；再失败原样返回
-func decodeText(b []byte) string {
-	if len(b) >= 3 && b[0] == 0xEF && b[1] == 0xBB && b[2] == 0xBF {
-		return string(b[3:])
-	}
-	if utf8.Valid(b) {
-		return string(b)
-	}
-	if out, err := simplifiedchinese.GB18030.NewDecoder().Bytes(b); err == nil && utf8.Valid(out) {
-		return string(out)
-	}
-	return string(b)
-}
-
-// SaveHtmlPath 导出 HTML 的保存对话框
-func (f *Files) SaveHtmlPath(name string) (string, error) {
-	return runtime.SaveFileDialog(f.ctx, runtime.SaveDialogOptions{
-		Title:           "导出 HTML",
-		DefaultFilename: name,
-		Filters: []runtime.FileFilter{
-			{DisplayName: "HTML (*.html)", Pattern: "*.html"},
-		},
-	})
-}
-
-// SaveClipboardImage 把 base64 图片写入 dir/name（自动建目录），返回完整路径
-func (f *Files) SaveClipboardImage(dir, name, b64 string) (string, error) {
-	data, err := base64.StdEncoding.DecodeString(b64)
-	if err != nil {
-		return "", err
-	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", err
-	}
-	p := filepath.Join(dir, name)
-	if err := os.WriteFile(p, data, 0o644); err != nil {
-		return "", err
-	}
-	return p, nil
-}
-
-// WriteFile 保存文件内容
-func (f *Files) WriteFile(path, content string) error {
-	return os.WriteFile(path, []byte(content), 0o644)
-}
-
-// ---------- 配置目录与持久化 ----------
-
-func (f *Files) ConfigDir() (string, error) {
-	base, err := os.UserConfigDir()
-	if err != nil {
-		return "", err
-	}
-	dir := filepath.Join(base, "KairosMd")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", err
-	}
-	return dir, nil
-}
-
-// ReadConfig 读取 config.json；不存在时返回空 map（不报错）
-func (f *Files) ReadConfig() (map[string]any, error) {
-	dir, err := f.ConfigDir()
-	if err != nil {
-		return nil, err
-	}
-	b, err := os.ReadFile(filepath.Join(dir, "config.json"))
-	if err != nil {
-		if os.IsNotExist(err) {
-			return map[string]any{}, nil
-		}
-		return nil, err
-	}
-	cfg := map[string]any{}
-	if err := json.Unmarshal(b, &cfg); err != nil {
-		return map[string]any{}, nil // 配置损坏时回退默认值
-	}
-	return cfg, nil
-}
-
-func (f *Files) SaveConfig(cfg map[string]any) error {
-	dir, err := f.ConfigDir()
-	if err != nil {
-		return err
-	}
-	b, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(filepath.Join(dir, "config.json"), b, 0o644)
-}
-
 // ---------- 外部插件与用户主题 ----------
 
 func (f *Files) ListExternalPlugins() []ExternalPlugin {
@@ -439,5 +448,5 @@ func (f *Files) RevealPath(path string) error {
 
 // AppVersion 返回应用版本号，供插件 API 判断兼容性
 func (f *Files) AppVersion() string {
-	return "0.1.0"
+	return "0.2.0"
 }

@@ -18,21 +18,24 @@
 
 - Go 1.21+
 - Node.js 18+
-- Wails CLI v2（`go install github.com/wailsapp/wails/v2/cmd/wails@latest`）
+- Wails CLI v3（`go install github.com/wailsapp/wails/v3/cmd/wails3@latest`）
+- Task（构建任务运行器，`go install github.com/go-task/task/v3/cmd/task@latest`）
 - Windows 需要 WebView2 运行时（Win10/11 通常已预装）
 
 ### 开发
 
 ```bash
-wails dev      # 热重载开发
-wails build    # 生成可执行文件到 build/bin/
+wails3 dev              # 热重载开发
+wails3 build            # 生成可执行文件到 bin/
+wails3 package          # 生成 NSIS 安装包（含 .md 文件关联注册）
+wails3 generate bindings  # Go 服务方法变更后重新生成前端绑定
 ```
 
 ### 使用
 
-打开 `build/bin/KairosMd.exe`，按 `Ctrl+O` 打开一个 Markdown 文件，或直接拖入。`samples/` 目录里有完整的示例文档。
+打开 `bin/KairosMd.exe`，按 `Ctrl+O` 打开一个 Markdown 文件，或直接拖入。`samples/` 目录里有完整的示例文档。
 
-要让 KairosMd 成为 Windows 的 Markdown 默认打开方式，请使用 `wails build --nsis` 生成并运行安装包。安装器会注册 `.md`、`.markdown` 和 `.mdx` 文件关联；之后在资源管理器中双击这些文件即可直接打开。直接运行 `build/bin/KairosMd.exe` 不会自动修改系统文件关联。
+要让 KairosMd 成为 Windows 的 Markdown 默认打开方式，请使用 `wails3 package` 生成并运行安装包。安装器会注册 `.md`、`.markdown` 和 `.mdx` 文件关联；之后在资源管理器中双击这些文件即可直接打开。直接运行 `bin/KairosMd.exe` 不会自动修改系统文件关联。
 
 ## ⌨️ 快捷键
 

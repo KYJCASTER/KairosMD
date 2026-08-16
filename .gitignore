@@ -1,8 +1,11 @@
 # 构建产物
+bin
 build/bin
 frontend/dist
-build/windows/icon.ico
 *.exe
+.task
+build/linux/appimage/build
+build/windows/nsis/MicrosoftEdgeWebview2Setup.exe
 
 # 依赖
 node_modules
@@ -10,4 +13,6 @@ node_modules
 # 会话/工具数据
 .zcode
 frontend/package.json.md5
-build/windows/appicon.ico
+# 移动端构建生成物（Windows 项目不需要）
+build/android
+build/ios

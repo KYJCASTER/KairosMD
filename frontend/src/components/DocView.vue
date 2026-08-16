@@ -1,17 +1,19 @@
 <script setup lang="ts">
-/** 文档视图容器：编辑 / 对比 / 预览三态 + 对比模式可拖动分隔条 + 双向滚动同步 */
+/** 单个文档标签的视图容器：编辑 / 对比 / 预览三态 + 拖动分隔条 + 双向滚动同步（绑定传入的 doc 会话） */
 import { computed, onBeforeUnmount, ref } from 'vue'
-import { useLibraryStore } from '../stores/library'
+import { useLibraryStore, type DocSession } from '../stores/library'
 import { useSettingsStore } from '../stores/settings'
 import { bus } from '../core/events'
 import EditorPane from './EditorPane.vue'
 import ReaderView from './ReaderView.vue'
 
+const props = defineProps<{ doc: DocSession }>()
+
 const lib = useLibraryStore()
 const settings = useSettingsStore()
 
-const showEditor = computed(() => lib.mode === 'split' || lib.mode === 'edit')
-const showReader = computed(() => lib.mode === 'split' || lib.mode === 'read')
+const showEditor = computed(() => props.doc.mode === 'split' || props.doc.mode === 'edit')
+const showReader = computed(() => props.doc.mode === 'split' || props.doc.mode === 'read')
 
 const docEl = ref<HTMLElement | null>(null)
 const editorRef = ref<InstanceType<typeof EditorPane> | null>(null)
@@ -56,17 +58,16 @@ function onJumpToLine(line: number) {
 
 function onToggleTask(line: number) {
   if (editorRef.value?.toggleTaskAtLine(line)) return
-  lib.toggleTaskFallback(line)
+  lib.toggleTaskFor(props.doc.id, line)
 }
 
-// 大纲跳转：预览滚到锚点，编辑器光标同步落到源码行
+// 大纲跳转：仅活跃标签响应（每个标签的 DocView 都挂着监听）
 const offTocGoto = bus.on('toc:goto', ({ id, line }) => {
+  if (props.doc.id !== lib.activeDocId) return
   readerRef.value?.scrollToId(id)
   if (line > 0) editorRef.value?.cursorToLine(line)
 })
 onBeforeUnmount(() => offTocGoto())
-
-onBeforeUnmount(() => clearTimeout(syncTimer))
 
 let stopDrag: (() => void) | null = null
 
@@ -104,28 +105,38 @@ function resetSplit() {
   settings.schedulePersist()
 }
 
-onBeforeUnmount(() => stopDrag?.())
+onBeforeUnmount(() => {
+  clearTimeout(syncTimer)
+  stopDrag?.()
+})
 </script>
 
 <template>
-  <div ref="docEl" class="k-doc" :data-mode="lib.mode" :style="{ '--k-split': splitVar }">
+  <div ref="docEl" class="k-doc" :data-mode="doc.mode" :style="{ '--k-split': splitVar }">
     <!-- v-show 保活：切换模式不丢撤销历史 / 光标 / 滚动位置 -->
     <EditorPane
       ref="editorRef"
       v-show="showEditor"
-      :model-value="lib.content"
-      @update:model-value="lib.setContent($event)"
+      :model-value="doc.content"
+      @update:model-value="lib.setContentFor(doc.id, $event)"
       @scrolled="onEditorScrolled"
     />
     <div
-      v-if="lib.mode === 'split'"
+      v-if="doc.mode === 'split'"
       class="k-splitter"
       :class="{ drag: dragging }"
       title="拖动调节宽度 · 双击复位"
       @mousedown="onSplitterDown"
       @dblclick="resetSplit"
     />
-    <ReaderView ref="readerRef" v-show="showReader" @scrolled="onReaderScrolled" @jump="onJumpToLine" @toggle-task="onToggleTask" />
+    <ReaderView
+      ref="readerRef"
+      v-show="showReader"
+      :doc="doc"
+      @scrolled="onReaderScrolled"
+      @jump="onJumpToLine"
+      @toggle-task="onToggleTask"
+    />
   </div>
 </template>
 

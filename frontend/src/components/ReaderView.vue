@@ -1,17 +1,18 @@
 <script setup lang="ts">
-/** 阅读视图：渲染容器 + 进度条 + 滚动 spy + 阅读位置记忆 + 点击委托（外链/.md/锚点/剧透/跳源码行） */
+/** 阅读视图：绑定单个文档会话，渲染容器 + 进度条 + 滚动 spy + 位置记忆 + 点击委托（外链/.md/锚点/跳源码行） */
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useLibraryStore } from '../stores/library'
+import { useLibraryStore, type DocSession } from '../stores/library'
 import { useSettingsStore } from '../stores/settings'
 import { useUiStore } from '../stores/ui'
 import { bus } from '../core/events'
 import { BrowserOpenURL } from '../../wailsjs/runtime/runtime'
 
+const props = defineProps<{ doc: DocSession }>()
+const emit = defineEmits<{ scrolled: []; jump: [line: number]; toggleTask: [line: number] }>()
+
 const lib = useLibraryStore()
 const settings = useSettingsStore()
 const ui = useUiStore()
-
-const emit = defineEmits<{ scrolled: []; jump: [line: number]; toggleTask: [line: number] }>()
 
 const scrollEl = ref<HTMLElement | null>(null)
 const articleEl = ref<HTMLElement | null>(null)
@@ -33,7 +34,7 @@ function onScroll() {
   if (!el || restoring) return
   emitScrolled()
   const max = el.scrollHeight - el.clientHeight
-  lib.ratio = max > 0 ? Math.min(1, el.scrollTop / max) : 0
+  props.doc.ratio = max > 0 ? Math.min(1, el.scrollTop / max) : 0
 
   // 滚动 spy：最后一个顶部越过阈值的标题
   const heads = articleEl.value?.querySelectorAll<HTMLElement>('h1[id],h2[id],h3[id],h4[id]')
@@ -43,18 +44,18 @@ function onScroll() {
       if (h.getBoundingClientRect().top <= 110) active = h.id
       else break
     }
-    lib.activeId = active
+    props.doc.activeHeading = active
   }
 
   if (saveTimer) clearTimeout(saveTimer)
-  saveTimer = setTimeout(() => settings.savePosition(lib.currentPath, lib.ratio), 600)
+  saveTimer = setTimeout(() => settings.savePosition(props.doc.path, props.doc.ratio), 600)
 }
 
 function restoreScroll() {
   const el = scrollEl.value
   if (!el) return
   restoring = true
-  const r = settings.getPosition(lib.currentPath)
+  const r = settings.getPosition(props.doc.path)
   el.scrollTop = r != null ? r * (el.scrollHeight - el.clientHeight) : 0
   requestAnimationFrame(() => {
     restoring = false
@@ -62,7 +63,7 @@ function restoreScroll() {
   })
 }
 
-/** 点击委托：外链走系统浏览器、.md 链接在阅读器内打开、锚点平滑滚动、剧透揭开、任务框点选、普通文本跳源码行 */
+/** 点击委托：外链走系统浏览器、.md 链接打开新标签、锚点平滑滚动、剧透揭开、任务框回写、普通文本跳源码行 */
 function onClick(e: MouseEvent) {
   const target = e.target as HTMLElement
   if (!(target instanceof HTMLElement)) return
@@ -175,41 +176,41 @@ function scrollToId(id: string) {
 
 defineExpose({ topSyncPoint, scrollToSync, scrollToId })
 
-// 渲染完成钩子：文件切换 → 恢复记忆位置；同文件打字重渲染 → 按源码行锚定，内容增删不漂移
+// 渲染完成钩子：路径变化 → 恢复记忆位置；同文件打字重渲染 → 按源码行锚定，内容增删不漂移
 let lastRenderPath = ''
 watch(
-  () => lib.html,
+  () => props.doc.html,
   async () => {
-    const fileChanged = lib.currentPath !== lastRenderPath
+    const fileChanged = props.doc.path !== lastRenderPath
     let anchor: { line: number; frac: number } | null = null
     if (!fileChanged) anchor = topSyncPoint() // pre-flush：DOM 还是旧的
     await nextTick()
-    lastRenderPath = lib.currentPath
+    lastRenderPath = props.doc.path
     syncEls = null
     if (fileChanged) restoreScroll()
     else if (anchor) scrollToSync(anchor.line, anchor.frac)
-    if (articleEl.value) bus.emit('reader:rendered', { path: lib.currentPath, el: articleEl.value })
+    if (articleEl.value) bus.emit('reader:rendered', { path: props.doc.path, el: articleEl.value })
   },
 )
 
-// 插件注册了新的 markdown 规则 / 语言补载完成 → 重渲染
-const offRefresh = bus.on('markdown:refresh', () => lib.render())
-const offLang = bus.on('lang:loaded', () => lib.render())
-const offTheme = bus.on('theme:changed', () => lib.render())
+// 插件注册了新的 markdown 规则 / 语言补载完成 → 重渲染本标签
+const offRefresh = bus.on('markdown:refresh', () => lib.renderSession(props.doc))
+const offLang = bus.on('lang:loaded', () => lib.renderSession(props.doc))
+const offTheme = bus.on('theme:changed', () => lib.renderSession(props.doc))
 
 // 图片异步加载、容器宽度变化都会改变锚点位置，ResizeObserver 失效缓存
 let ro: ResizeObserver | null = null
 
 onMounted(() => {
-  lastRenderPath = lib.currentPath
+  lastRenderPath = props.doc.path
   if (scrollEl.value && articleEl.value && 'ResizeObserver' in window) {
     ro = new ResizeObserver(() => (syncEls = null))
     ro.observe(scrollEl.value)
     ro.observe(articleEl.value)
   }
-  if (lib.html) {
+  if (props.doc.html) {
     restoreScroll()
-    if (articleEl.value) bus.emit('reader:rendered', { path: lib.currentPath, el: articleEl.value })
+    if (articleEl.value) bus.emit('reader:rendered', { path: props.doc.path, el: articleEl.value })
   }
 })
 onBeforeUnmount(() => {
@@ -223,7 +224,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="k-reader" :class="{ 'k-immersive-on': ui.immersive }">
-    <div class="k-progress" :style="{ width: `${Math.round(lib.ratio * 100)}%` }" />
+    <div class="k-progress" :style="{ width: `${Math.round(doc.ratio * 100)}%` }" />
     <div ref="scrollEl" class="k-scroll" @scroll.passive="onScroll" @click="onClick">
       <div v-if="lib.loading" class="k-reader-state">
         <div class="k-kaomoji">(っ˘ω˘ς)</div>
@@ -233,7 +234,7 @@ onBeforeUnmount(() => {
         <div class="k-kaomoji">(´;ω;`)</div>
         <p>{{ lib.error }}</p>
       </div>
-      <article v-else ref="articleEl" class="k-md" v-html="lib.html" />
+      <article v-else ref="articleEl" class="k-md" v-html="doc.html" />
     </div>
   </div>
 </template>

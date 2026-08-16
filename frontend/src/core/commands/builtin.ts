@@ -27,10 +27,31 @@ export function registerBuiltinCommands() {
   })
   registerCommand({
     id: 'app:new',
-    title: '新建空白文档',
+    title: '新建标签页',
     group: '应用',
     hotkeys: ['mod+n'],
-    run: () => lib.newFile(),
+    run: () => lib.newTab(),
+  })
+  registerCommand({
+    id: 'app:close-tab',
+    title: '关闭当前标签',
+    group: '应用',
+    hotkeys: ['mod+w'],
+    run: () => lib.closeFile(),
+  })
+  registerCommand({
+    id: 'app:next-tab',
+    title: '下一个标签',
+    group: '应用',
+    hotkeys: ['mod+tab'],
+    run: () => lib.nextTab(1),
+  })
+  registerCommand({
+    id: 'app:prev-tab',
+    title: '上一个标签',
+    group: '应用',
+    hotkeys: ['mod+shift+tab'],
+    run: () => lib.nextTab(-1),
   })
   registerCommand({ id: 'app:home', title: '关闭文档，回到首页', group: '应用', hotkeys: ['alt+arrowleft'], run: () => lib.closeFile() })
   registerCommand({ id: 'app:settings', title: '设置', group: '应用', hotkeys: ['mod+,'], run: () => ui.openView('settings') })
@@ -126,7 +147,7 @@ export function registerBuiltinCommands() {
     group: '阅读',
     hotkeys: ['mod+r'],
     run: () => {
-      if (lib.currentPath) void lib.openFile(lib.currentPath, { keepScroll: true })
+      if (lib.currentPath) void lib.openFile(lib.currentPath, { reload: true })
     },
   })
   const adjustFont = (delta: number) => {
