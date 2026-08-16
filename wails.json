@@ -1,0 +1,41 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "kairosmd",
+  "outputfilename": "KairosMd",
+  "frontend:install": "npm install",
+  "frontend:build": "npm run build",
+  "frontend:dev:watcher": "npm run dev",
+  "frontend:dev:serverUrl": "auto",
+  "author": {
+    "name": "KYJCASTER",
+    "email": "16627183700@henu.edu.cn"
+  },
+  "info": {
+    "companyName": "KYJCASTER",
+    "productName": "KairosMd",
+    "productVersion": "0.1.0",
+    "fileAssociations": [
+      {
+        "ext": "md",
+        "name": "KairosMdMarkdown",
+        "description": "KairosMd Markdown 文档",
+        "iconName": "appicon",
+        "role": "Editor"
+      },
+      {
+        "ext": "markdown",
+        "name": "KairosMdMarkdownLong",
+        "description": "KairosMd Markdown 文档",
+        "iconName": "appicon",
+        "role": "Editor"
+      },
+      {
+        "ext": "mdx",
+        "name": "KairosMdMdx",
+        "description": "KairosMd MDX 文档",
+        "iconName": "appicon",
+        "role": "Editor"
+      }
+    ]
+  }
+}

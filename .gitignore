@@ -1,0 +1,13 @@
+# 构建产物
+build/bin
+frontend/dist
+build/windows/icon.ico
+*.exe
+
+# 依赖
+node_modules
+
+# 会话/工具数据
+.zcode
+frontend/package.json.md5
+build/windows/appicon.ico
